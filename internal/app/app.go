@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"farkle/view"
 	"net"
 	"os"
 	"os/signal"
@@ -70,13 +71,22 @@ func (a *app) Start() {
 	}
 }
 
+// this does handle how we can return the bt app to our players but not sure on how we're using it at this exact moment
 func (a *app) ProgramHandler(s ssh.Session) *tea.Program {
-	model := initialModel()
+
+	pty, _, _ := s.Pty()
+
+	bg := "light"
+	if renderer.HasDarkBackground() {
+		bg = "dark"
+	}
+
+	model := view.InitialModel(pty.Term, bg)
 	model.app = a
 	model.id = s.User()
 
 	p := tea.NewProgram(model, bubbletea.MakeOptions(s)...)
-	a.progs = append(a.progs, p)
+	a.players = append(a.players, p)
 
 	return p
 }

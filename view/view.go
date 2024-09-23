@@ -25,6 +25,13 @@ type Player struct {
 	// key gossh.PublicKey
 }
 
-func (b *BaseGame) Init() {
+func InitialModel(bg, term string) *BaseGame {
+	return &BaseGame{
+		term: term,
+		bg:   bg,
+	}
+}
+
+func (b *BaseGame) Init() tea.Cmd {
 
 }
