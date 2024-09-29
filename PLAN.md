@@ -34,3 +34,12 @@ This handler can be used to hook into the ssh middleware and execute things on c
 This can differ from a ProgramHandler that takes a session and returns a program. 
 
 So I guess we can have like an order of handlers, and one should be once conn it made, set-up ready for the bt programme to start, then inside the programme handler we input the server details and off we go I think?!=
+
+
+
+
+# sat 28.09
+
+We have ssh middleware, and inside our server is a list of all connections. We can communicate with all the current connections using a p.Send().
+
+So I think what we want to try is to make a connection, and add the name of connections to each persons screen as a new person connects to the server now. s

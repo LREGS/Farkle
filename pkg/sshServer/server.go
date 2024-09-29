@@ -7,39 +7,42 @@ import (
 	"github.com/charmbracelet/ssh"
 	"github.com/charmbracelet/wish"
 	"github.com/charmbracelet/wish/activeterm"
-	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
-	"github.com/muesli/termenv"
 )
 
 const (
 	host = "localhost"
-	port = "6969"
+	port = "6161"
 )
 
-// The server is responsible for handling and grouping incoming connections, and once ready, starting bt games and returning the applications to the players
-type SshServer struct {
-	srv         *ssh.Server
-	connections []string // just holds a copy of the current connections - maybe this should be a pointer to sessions instead
+type Server struct {
+	*ssh.Server
+	connections []string
 }
 
-func NewSshServer() *SshServer {
-	s, err := wish.NewServer(
+// middleware is a function that takes a handler and returns a handler - its a piece in a chain of events
+// a handler is a callback for handling established sessions. Basically, as the ssh session is established,
+// a handler is invoked which is a function that takes a session.
+
+func NewServer() *Server {
+	s := &Server{
+		connections: make([]string, 0),
+	}
+
+	srv, err := wish.NewServer(
 		wish.WithAddress(net.JoinHostPort(host, port)),
-		wish.WithHostKeyPath(".ssh/id_ed25519"),
+		wish.WithHostKeyPath(".ssh/id_ed25519"), //TODO: find out  what to actually put
 		wish.WithMiddleware(
-			bubbletea.MiddlewareWithProgramHandler(a.ProgramHandler, termenv.ANSI256),
 			activeterm.Middleware(),
 			logging.Middleware(),
 		),
 	)
 	if err != nil {
-		log.Error("Could not start server", "error", err)
+		log.Error("failed to create server ", err)
 	}
 
-	return &SshServer{
-		srv:         s,
-		connections: make([]string, 4),
-	}
+	s.Server = srv
+
+	return s
 
 }
