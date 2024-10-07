@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"net"
-	"sync"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,30 +23,39 @@ const (
 	port = "6161"
 )
 
-type connection struct {
-	game *tea.Program
-	Name string
+// our server with a list of all current bubbletea programs running (essentialy a connection list)
+// we can handle communication between the players here using p.Send() functions to communicate between
+// bt instances.
+
+// The app will also be embedded into each Bt instance so that the users of the app itself
+// are exposed to the methods on the server. This leads to user initiated communication etc
+type app struct {
+	*ssh.Server
+	progs []*tea.Program
 }
 
-type Server struct {
-	server      *ssh.Server
-	connections []*connection
-	connNames   chan string
-	mu          sync.Mutex // Added Mutex to prevent race conditions
+// send will despatch a tea.Msg to all the apps within the server. Can be used to send any type of
+// tea.Msg that will be defined within the app itself
+
+// so - does this mean that say during init() function we can just send a ConnectionSuccess tea.Msg
+// that will broadcast to all new apps that a new connection has been made
+
+// I think it is within this function that we need a switch/case style too
+// that depending on which msg is being sent will also communicate with the game proper to calculate scores and state etc
+func (a *app) send(msg tea.Msg) {
+	for _, p := range a.progs {
+		go p.Send(msg)
+	}
 }
 
 // NewServer initializes the server and returns the Server struct
-func NewServer() *Server {
-	s := &Server{
-		connections: make([]*connection, 0),
-		connNames:   make(chan string, 10), // Buffered channel to avoid deadlock
-	}
-
+func NewApp() *app {
+	a := new(app)
 	srv, err := wish.NewServer(
 		wish.WithAddress(net.JoinHostPort(host, port)),
 		wish.WithHostKeyPath(".ssh/id_ed25519"), // Ensure this path is valid
 		wish.WithMiddleware(
-			s.StartInitialGame(),
+			bubbletea.MiddlewareWithProgramHandler(a.ProgramHandler, termenv.ANSI256),
 			activeterm.Middleware(),
 			logging.Middleware(),
 		),
@@ -53,84 +65,59 @@ func NewServer() *Server {
 		return nil // Return nil if server creation fails
 	}
 
-	s.server = srv
+	a.Server = srv
 
-	return s
+	return a
 }
 
-// CurrPlayerNames returns a list of the names of all currently connected players
-func (s *Server) CurrPlayerNames() []string {
-	s.mu.Lock()         // Lock the connection list to prevent race conditions
-	defer s.mu.Unlock() // Unlock after accessing the connection list
-
-	currConns := []string{}
-	for _, conn := range s.connections {
-		currConns = append(currConns, conn.Name)
-	}
-
-	return currConns
-}
-
-type connectionMessage string
-
-// StartInitialGame sets up the game for new SSH connections
-func (s *Server) StartInitialGame() wish.Middleware {
-
-	// using a pointer so it survives on the heap when the function exits before callbacks are called
-	conn := &connection{}
-
-	newProg := func(m tea.Model, opts ...tea.ProgramOption) *tea.Program {
-		p := tea.NewProgram(m, opts...)
-		conn.game = p
-		go func() {
-			// Receive new player name from channel and send it to the program
-			newPlayers := <-s.connNames
-			p.Send(connectionMessage(newPlayers))
-		}()
-		return p
-	}
-
-	teaHandler := func(ss ssh.Session) *tea.Program {
-		pty, _, active := ss.Pty()
-		if !active {
-			wish.Fatalln(ss, "No active terminal, skipping")
-			return nil
+func (a *app) Start() {
+	var err error
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	log.Info("Starting SSH server", "host", host, "port", port)
+	go func() {
+		if err = a.ListenAndServe(); err != nil {
+			log.Error("Could not start server", "error", err)
+			done <- nil
 		}
+	}()
 
-		conn.Name = ss.User()
-
-		// Log and send the connection name to the channel
-		log.Info("Sending connection name to channel: ", conn.Name)
-		s.connNames <- conn.Name
-
-		// Build the model with current player names and terminal settings
-		m := model{
-			players: s.CurrPlayerNames(),
-			term:    pty.Term,
-			width:   pty.Window.Width,
-			height:  pty.Window.Height,
-			time:    time.Now(),
-		}
-		return newProg(m, append(bubbletea.MakeOptions(ss), tea.WithAltScreen())...)
+	<-done
+	log.Info("Stopping SSH server")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer func() { cancel() }()
+	if err := a.Shutdown(ctx); err != nil {
+		log.Error("Could not stop server", "error", err)
 	}
-
-	// Safely append the connection using the mutex
-	s.mu.Lock()
-	s.connections = append(s.connections, conn)
-	s.mu.Unlock()
-
-	return bubbletea.MiddlewareWithProgramHandler(teaHandler, termenv.ANSI256)
 }
+
+func (a *app) ProgramHandler(s ssh.Session) *tea.Program {
+	m := initialModel()
+	m.app = a
+	m.playerName = s.User()
+	m.players = append(m.players, s.User())
+
+	p := tea.NewProgram(m, bubbletea.MakeOptions(s)...)
+	a.progs = append(a.progs, p)
+
+	return p
+}
+
+type (
+	ReadyMsg struct {
+		msg string
+	}
+)
 
 type model struct {
-	players []string
-	term    string
-	width   int
-	height  int
-	time    time.Time
+	*app
+	playerName string
+	players    []string
 }
 
-type timeMsg time.Time
+func initialModel() model {
+	return model{players: []string{}}
+}
 
 func (m model) Init() tea.Cmd {
 	return nil
@@ -139,47 +126,31 @@ func (m model) Init() tea.Cmd {
 // Update processes incoming messages and updates the model state accordingly
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case timeMsg:
-		m.time = time.Time(msg)
-	case tea.WindowSizeMsg:
-		m.height = msg.Height
-		m.width = msg.Width
-	case connectionMessage:
-		// Append new players to the list
-		m.players = append(m.players, string(msg))
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "r":
+			m.app.send(ReadyMsg{msg: m.playerName})
 		}
+	case ReadyMsg:
+		m.players = append(m.players, msg.msg)
+		return m, nil
 	}
 	return m, nil
 }
 
-// View returns a string representation of the model (displayed to the user)
 func (m model) View() string {
-	// Format player names for display
-	var cPlayers string
-	for _, p := range m.players {
-		cPlayers += p + "\n"
+	s := ""
+	for _, player := range m.players {
+		s += player
 	}
-	return cPlayers
+
+	return s
 }
 
 func main() {
-	// Create the server instance
-	s := NewServer()
 
-	// If server creation fails, exit
-	if s == nil {
-		log.Fatal("Failed to initialize the server")
-	}
-
-	// Log that the server is starting
-	log.Infof("Starting SSH server on %s:%s", host, port)
-
-	// Start the server and listen for incoming connections
-	if err := s.server.ListenAndServe(); err != nil {
-		log.Fatal("Failed to start server: ", err)
-	}
+	app := NewApp()
+	app.Start()
 }
