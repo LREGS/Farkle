@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 
@@ -26,13 +25,10 @@ const (
 type UI struct {
 	CurrState state
 	Data      c.GameData
-	log       *log.Logger
 }
 
-func NewUI(log *log.Logger) *UI {
-	return &UI{
-		log: log,
-	}
+func NewUI() *UI {
+	return &UI{}
 }
 
 func (u *UI) Update(newState state, data c.GameData) {
