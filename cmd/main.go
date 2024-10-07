@@ -49,6 +49,15 @@ type app struct {
 
 // I think it is within this function that we need a switch/case style too
 // that depending on which msg is being sent will also communicate with the game proper to calculate scores and state etc
+
+// counter to all of this is to just keep the old c functionality and literally just server the application
+// over ssh as we currently are. If you run the c server make sure the ports are correct both of these applicaftions
+// will access the c server and you can play the game no problem
+// the ssh server doesnt need to care about running the game or anything its just serving the app
+// the app needs to worry about running the game and it does that however it wants we shouldn't care about
+// that in the ssh server so we do not need to send messages between apps through the ssh server, we can do that
+// through the game server as we were before!
+
 func (a *app) send(msg tea.Msg) {
 	for _, p := range a.progs {
 		go p.Send(msg)
@@ -235,51 +244,6 @@ func (m *BaseModel) View() string {
 	// m.log.Print(m.screen)
 	return m.UI.Render()
 }
-
-// type (
-// 	ReadyMsg struct {
-// 		msg string
-// 	}
-// )
-
-// type model struct {
-// 	*app
-// 	playerName string
-// 	players    []string
-// 	view       *view.UI
-// }
-
-// func initialModel() model {
-// 	return model{
-// 		players: []string{},
-// 		view:    view.NewUI(),
-// 	}
-// }
-
-// func (m model) Init() tea.Cmd {
-// 	return nil
-// }
-
-// // Update processes incoming messages and updates the model state accordingly
-// func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-// 	switch msg := msg.(type) {
-// 	case tea.KeyMsg:
-// 		switch msg.String() {
-// 		case "q", "ctrl+c":
-// 			return m, tea.Quit
-// 		case "r":
-// 			m.app.send(ReadyMsg{msg: m.playerName})
-// 		}
-// 	case ReadyMsg:
-// 		m.players = append(m.players, msg.msg)
-// 		return m, nil
-// 	}
-// 	return m, nil
-// }
-
-// func (m model) View() string {
-// 	return m.view.Render()
-// }
 
 func main() {
 
